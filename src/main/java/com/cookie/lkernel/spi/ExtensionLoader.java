@@ -99,7 +99,7 @@ public class ExtensionLoader<T> {
     public T getExtension() {
         Spi spi = type.getAnnotation(Spi.class);
         return Optional.ofNullable(spi)
-                .map(annotation -> getExtension(annotation.value()))
+                .map(annotation -> getExtension(annotation.value().trim()))
                 .orElseThrow(() -> new NullPointerException("接口不存在 Spi 注解"));
     }
 
