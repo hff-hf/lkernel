@@ -38,7 +38,6 @@ public class ExtensionLoader<T> {
     /** 同步锁 **/
     private final ReentrantLock lock = new ReentrantLock();
 
-
     public ExtensionLoader(Class<?> type) {
         this.type = type;
     }
@@ -81,6 +80,7 @@ public class ExtensionLoader<T> {
         }
         try {
             lock.lock();
+            // 双重检查锁
             instance = Optional.ofNullable(holder.getObj()).orElseGet(() -> {
                 Object obj = createExtension(key);
                 holder.setObj(obj);
@@ -93,19 +93,31 @@ public class ExtensionLoader<T> {
     }
 
     /**
+     * 根据注解Spi中的value值获取实例
+     * @return T
+     */
+    public T getExtension() {
+        Spi spi = type.getAnnotation(Spi.class);
+        return Optional.ofNullable(spi)
+                .map(annotation -> getExtension(annotation.value()))
+                .orElseThrow(() -> new NullPointerException("接口不存在 Spi 注解"));
+    }
+
+    /**
      * 创建实例对象
      * @param key key
      * @return obj
      */
     private Object createExtension(String key) {
         Class<?> clazz = getExtensionClass().get(key);
-        return Optional.ofNullable(clazz).map(cls -> Optional.ofNullable(EXTENSION_INSTANCES.get(cls)).orElseGet(() -> {
-            try {
-                EXTENSION_INSTANCES.putIfAbsent(cls, cls.getDeclaredConstructor().newInstance());
-                return EXTENSION_INSTANCES.get(cls);
-            } catch (Exception e) {
-                throw new RuntimeException("create instance has error");
-            }
+        return Optional.ofNullable(clazz).map(cls -> Optional.ofNullable(EXTENSION_INSTANCES.get(cls))
+                .orElseGet(() -> {
+                    try {
+                        EXTENSION_INSTANCES.putIfAbsent(cls, cls.getDeclaredConstructor().newInstance());
+                        return EXTENSION_INSTANCES.get(cls);
+                    } catch (Exception e) {
+                        throw new RuntimeException("create instance has error");
+                    }
         })).orElseThrow(() -> new IllegalArgumentException("非法对象key"));
     }
 
@@ -123,22 +135,12 @@ public class ExtensionLoader<T> {
     }
 
     private Map<String, Class<?>> loadExtensionCalssMap() {
-        // 判断传进来的接口类型 type是标上Spi注解
+        // 判断传进来的接口类型 type是标上Spi注解--后续做一些其他处理
         final Spi spi = type.getAnnotation(Spi.class);
-        Optional.ofNullable(spi).ifPresent(annotation -> {
-            //获取注解里面的value值
-            String value = annotation.value().trim();
-            if (value.length() > 0) {
-                //...感觉无需判断
-            }
-        });
-        // 加载配置文件内容
-        return loadObjByDir(EXT_DIRECTORY);
-    }
 
-    private Map<String, Class<?>> loadObjByDir(String extDirectory) {
-        // 构造完整文件路径 extDIr + type.name
-        String file = extDirectory + this.type.getName();
+
+        // 加载配置文件内容 构造完整文件路径 extDIr + type.name
+        String file = EXT_DIRECTORY + this.type.getName();
         // 利用本类 获取classLoader
         ClassLoader classLoader = ExtensionLoader.class.getClassLoader();
 
@@ -192,6 +194,31 @@ public class ExtensionLoader<T> {
         cacheObjMap.putIfAbsent(name, clazz);
     }
 
+    /**
+     * 清理 加载器  & 缓存对象
+     */
+    public void clear() {
+        if (!EXTENSION_LOADERS.isEmpty()) {
+            EXTENSION_LOADERS.forEach((key, val) -> {
+                clear(val);
+            });
+            EXTENSION_LOADERS.clear();
+        }
+        if (!EXTENSION_INSTANCES.isEmpty()) {
+            EXTENSION_INSTANCES.clear();
+        }
+
+    }
+
+    private void clear(ExtensionLoader<?> extensionLoader) {
+        if (!extensionLoader.cachedInstances.isEmpty()) {
+            cachedInstances.clear();
+        }
+        Map<String, Class<?>> classMap = extensionLoader.cachedClasses.getObj();
+        if (Objects.nonNull(classMap) && !classMap.isEmpty()) {
+            classMap.clear();
+        }
+    }
 
     /**
      * 判断是否是 Spi注解
